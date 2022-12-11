@@ -1,0 +1,611 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>WebGL deferred area lights [video texture][three.js]</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				background-color: #000;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			#info {
+				position: absolute;
+				top: 20px; width: 100%;
+				color: #ffffff;
+				padding: 5px;
+				font-family: Monospace;
+				font-size: 13px;
+				text-align: center;
+			}
+
+			a {
+				color: #ff0080;
+				text-decoration: none;
+			}
+
+			a:hover {
+				color: #0080ff;
+			}
+
+			#play_overlay {
+				position: absolute;
+				font-size: 5em;
+				text-align: center;
+				top: 7em;
+				z-index: 100;
+				width:100%;
+				display: none;
+			}
+
+			.pbutton {
+				cursor: pointer;
+				border: solid 1px white;
+				color: #fff;
+				width: 7em;
+				margin: 0 auto;
+				padding: 0.5em;
+			}
+
+			#stats { position: absolute; top:10px; left: 5px }
+			#stats #fps { background: transparent !important }
+			#stats #fps #fpsText { color: #aaa !important }
+			#stats #fps #fpsGraph { display: none }
+		</style>
+	</head>
+
+	<body>
+		<div id="play_overlay"><div class="pbutton" id="play_button">Start</div></div>
+<!-- 
+		<div id="info">
+			<a href="https://threejs.org" target="_blank">three.js</a> - textured area lights -
+			based on <a href="http://www.gamedev.net/topic/552315-glsl-area-light-implementation/" target="_blank">ArKano22</a> and
+			<a href="http://devlog-martinsh.blogspot.sk/2012/11/bge-candy-area-lights.html">martinsh</a> glsl implementation -
+			<a href="http://www.nasa.gov/multimedia/videogallery/index.html?media_id=141042671" target="_blank">Walking on Air</a> video
+			by <a href="http://www.nasa.gov/" target="_blank">NASA</a>
+		</div> -->
+		
+		<div id="container"></div>
+
+		<script src="js/three.max.deferredareatexture.js"></script>
+
+		<!--
+		<script src="../build/three.min.js"></script>
+
+		<script src="js/renderers/WebGLDeferredRenderer.js"></script>
+		<script src="js/ShaderDeferred.js"></script>
+
+		<script src="js/shaders/CopyShader.js"></script>
+		<script src="js/shaders/FXAAShader.js"></script>
+		<script src="js/shaders/ConvolutionShader.js"></script>
+
+		<script src="js/postprocessing/EffectComposer.js"></script>
+		<script src="js/postprocessing/RenderPass.js"></script>
+		<script src="js/postprocessing/ShaderPass.js"></script>
+		<script src="js/postprocessing/MaskPass.js"></script>
+		<script src="js/postprocessing/BloomPass.js"></script>
+		-->
+
+		<script src="js/libs/stats.min.js"></script>
+
+		<video id="video" style="display:none">
+			<source src="./textures/fluid2.mp4">
+		</video>
+
+		<script>
+
+			var buttonElement = document.getElementById( "play_button" );
+			var buttonOverlayElement = document.getElementById( "play_overlay" );
+			var playButtonVisible = false;
+
+			// if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			var SCALE = 0.5;
+			var MARGIN = 0;
+
+			var WIDTH = window.innerWidth*2;
+			var HEIGHT = window.innerHeight*2 - 2 * MARGIN;
+
+			var NEAR = 1.0, FAR = 23000.0;
+			var VIEW_ANGLE = 30;
+
+			// controls
+
+			var mouseX = 0;
+			var mouseY = 0;
+
+			var targetX = 0, targetY = 0;
+			var angle = 0;
+			var target = new THREE.Vector3( 0, 5, -20 );
+
+			var windowHalfX = window.innerWidth / 2;
+			var windowHalfY = window.innerHeight / 2;
+
+			// core
+
+			var renderer, camera, scene, stats, clock;
+
+			// lights
+
+			var areaLight1, areaLight2, areaLight3;
+
+			//
+
+			var video;
+			var morph;
+
+			//
+
+			init();
+			animate();
+
+			// -----------------------------
+
+			function init() {
+
+				// camera
+
+				camera = new THREE.PerspectiveCamera( VIEW_ANGLE, WIDTH / HEIGHT, NEAR, FAR );
+				camera.position.y = 50;
+
+				// scene
+
+				scene = new THREE.Scene();
+				scene.add( camera );
+
+				// video
+
+				video = document.getElementById( 'video' );
+				video.loop = true;
+				//video.volume = 0;
+
+				texture = new THREE.Texture( video );
+				texture.format = THREE.RGBAFormat;
+
+				//texture = THREE.ImageUtils.loadTexture('textures/ash_uvgrid01.jpg');
+				//texture.anisotropy = 4;
+				//texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+
+
+				handlePlay( video );
+
+				// renderer
+
+				renderer = new THREE.WebGLDeferredRenderer( { width: WIDTH, height: HEIGHT, scale: SCALE, antialias: true, tonemapping: THREE.UnchartedOperator, brightness: 20 } );
+
+				renderer.domElement.style.position = "absolute";
+				renderer.domElement.style.top = "-100vh"; //MARGIN + "px"
+				renderer.domElement.style.left = "0px";
+
+				var container = document.getElementById( 'container' );
+				console.log(container)
+				console.log(renderer.domElement)
+				container.appendChild( renderer.domElement );
+
+				// effects
+
+				//var bloomEffect = new THREE.BloomPass( 0.65 );
+				//renderer.addEffect( bloomEffect );
+
+				// stats
+
+				stats = new Stats();
+				stats.domElement.style.position = 'absolute';
+				stats.domElement.style.top = '8px';
+				stats.domElement.style.zIndex = 100;
+				container.appendChild( stats.domElement );
+
+				// clock
+
+				clock = new THREE.Clock();
+
+				// add lights
+
+				initLights();
+
+				// add objects
+
+				initObjects();
+
+				// events
+
+				document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				//
+
+				buttonElement.addEventListener( "click", function() {
+
+					video.play();
+
+					hideButton();
+
+				}, false );
+
+				centerButton();
+
+			}
+
+			// -----------------------------------------------------------------------------------
+
+			function handlePlay( mediaElement ) {
+
+				var promise = mediaElement.play();
+
+				if ( promise !== undefined ) {
+
+					promise.then( function () {
+
+						// Autoplay started!
+
+						console.log( "[autoPlay started]" );
+
+						hideButton();
+
+					} ).catch( function ( error ) {
+
+						// Autoplay was prevented.
+						// Show a "Play" button so that user can start playback.
+
+						console.log( "[autoPlay prevented]" );
+
+						showButton();
+						centerButton();
+
+					} );
+
+				}
+
+			}
+
+			// -----------------------------------------------------------------------------------
+
+			function hideButton() {
+
+				if ( playButtonVisible ) {
+
+					buttonOverlayElement.style.display = "none";
+					playButtonVisible = false;
+
+				}
+
+			}
+
+			function showButton() {
+
+				if ( ! playButtonVisible ) {
+
+					buttonOverlayElement.style.display = "block";
+					playButtonVisible = true;
+
+				}
+
+			}
+
+			function centerButton() {
+
+				buttonOverlayElement.style.top = Math.floor( ( window.innerHeight - buttonOverlayElement.offsetHeight ) * 0.5 ) + 'px';
+
+			}
+
+			// -----------------------------
+
+			function createAreaEmitter( light ) {
+
+				var geometry = new THREE.PlaneGeometry( light.width *2.25 , light.height *2.25);
+
+				var m = new THREE.Matrix4();
+				m.makeRotationX( Math.PI/2 );
+				geometry.applyMatrix( m );
+
+				var material = new THREE.MeshBasicMaterial( { color: light.color.getHex(), vertexColors: THREE.FaceColors } );
+				material.map = light.texture;
+				//material.alphaTest = 0.5;
+
+				var emitter = new THREE.Mesh( geometry, material );
+
+				emitter.position = light.position;
+				emitter.rotation = light.rotation;
+
+				return emitter;
+
+			}
+
+			function setupAreaLight( light ) {
+
+				var matrix = light.matrixWorld;
+
+				light.right.set( 1, 0, 0 );
+				light.normal.set( 0, -1, 0 );
+				light.right = matrix.multiplyVector3( light.right );
+				light.normal = matrix.multiplyVector3( light.normal );
+
+			}
+
+			function initLights() {
+
+				var intensity = 1;
+				var isOpenOtherLight = true;
+
+				const lwidth = 5.12; //6
+				const lheight = 10.24; //12
+				const lPosY = lheight + 2.7; //7 
+
+				areaLight1 = new THREE.AreaLight( 0xffffff, intensity );
+				areaLight1.position.set( 0.0001, lPosY, -15.5001 );
+				areaLight1.rotation.set( -Math.PI/2, 0, 0 ); //-1.474719,0,0
+				areaLight1.width = lwidth;
+				areaLight1.height = lheight;
+
+				//var texture = THREE.ImageUtils.loadTexture( "textures/hello.png" );
+				//var texture = THREE.ImageUtils.loadTexture( "textures/disturb-normal.png" );
+				console.log(texture)
+				//texture = THREE.ImageUtils.loadTexture( "textures/ash_uvgrid01.jpg");
+				// texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping; //MirroredRepeatWrapping ClampToEdgeWrapping
+				// texture.anisotropy = 4;
+				
+				// texture.magFilter = THREE.LinearFilter;
+				// texture.minFilter = THREE.LinearMipMapLinearFilter;
+
+				//texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+				//texture.anisotropy = 4;
+
+				areaLight1.texture = texture;
+				//console.log(texture)
+
+				scene.add( areaLight1 );
+
+				const spotLight = new THREE.SpotLight( 0x222222,0.5 );
+				spotLight.position.set( 0, 50, 0 );
+				//scene.add( spotLight );
+
+				console.log(areaLight1);
+
+				// screen
+				var meshEmitter = createAreaEmitter( areaLight1 );
+				scene.add( meshEmitter );
+
+				// otherLight
+				if(isOpenOtherLight){
+					areaLight2 = new THREE.AreaLight( 0xffffff, intensity );
+					areaLight2.position.set( -19.0001, lPosY, 0.0001 );
+					areaLight2.rotation.set( -Math.PI/2, 0, Math.PI/2 ); //-1.5707
+					areaLight2.width = lwidth;
+					areaLight2.height = lheight;
+					areaLight2.texture = texture;
+
+					scene.add( areaLight2 );
+
+					var meshEmitter = createAreaEmitter( areaLight2 );
+					scene.add( meshEmitter );
+
+					//
+
+					areaLight3 = new THREE.AreaLight( 0xffffff, intensity );
+					areaLight3.position.set( 19.0001, lPosY, 0.0001 );
+					areaLight3.rotation.set( -Math.PI/2, 0., -Math.PI/2 );
+					areaLight3.width = lwidth;
+					areaLight3.height = lheight;
+					areaLight3.texture = texture;
+
+					scene.add( areaLight3 );
+
+					var meshEmitter = createAreaEmitter( areaLight3 );
+					scene.add( meshEmitter );
+				}
+
+			}
+
+			// -----------------------------
+
+			function initObjects() {
+
+				// floor
+				var TEXTURE_FLOOR_PATH = 'textures/floor_texture/'
+				var TEXTURE_REALISTIC_PATH = 'textures/realistic_texture/'
+				var repeatX = 4;
+				var repeatY = 4;
+
+				var texture = THREE.ImageUtils.loadTexture(TEXTURE_FLOOR_PATH + 'MetalRustRepolished001_COL_1K_SPECULAR.jpg');
+				texture.anisotropy = 4;
+				texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+				texture.repeat.set(repeatX, repeatY);
+
+				var normal = THREE.ImageUtils.loadTexture( TEXTURE_FLOOR_PATH + 'MetalRustRepolished001_NRM_1K_SPECULAR.jpg');
+				normal.anisotropy = 4;
+				normal.wrapS = normal.wrapT = THREE.ClampToEdgeWrapping;
+				normal.repeat.set(repeatX, repeatY);
+				
+				var ao = THREE.ImageUtils.loadTexture( TEXTURE_FLOOR_PATH + 'MetalRustRepolished001_GLOSS_VAR2_1K_SPECULAR.jpg');
+				ao.anisotropy = 4;
+				ao.wrapS = normal.wrapT = THREE.ClampToEdgeWrapping;
+				ao.repeat.set(repeatX, repeatY);
+
+				var displace = THREE.ImageUtils.loadTexture( TEXTURE_FLOOR_PATH + 'MetalRustRepolished001_DISP_1K_SPECULAR.jpg');
+				displace.anisotropy = 4;
+				displace.wrapS = displace.wrapT = THREE.ClampToEdgeWrapping;
+				displace.repeat.set(repeatX, repeatY); 
+				
+				var spec = THREE.ImageUtils.loadTexture( TEXTURE_FLOOR_PATH + 'MetalRustRepolished001_REFL_1K_SPECULAR.jpg');
+				spec.anisotropy = 4;
+				spec.wrapS = spec.wrapT = THREE.ClampToEdgeWrapping;
+				spec.repeat.set(repeatX, repeatY);
+
+				var realisticTex = THREE.ImageUtils.loadTexture(TEXTURE_REALISTIC_PATH + 'tex.jpg');
+				realisticTex.anisotropy = 4;
+				realisticTex.wrapS = realisticTex.wrapT = THREE.ClampToEdgeWrapping;
+				realisticTex.repeat.set(8, 8);
+
+				var realisticNormal = THREE.ImageUtils.loadTexture(TEXTURE_REALISTIC_PATH + 'normal.jpg');
+				realisticNormal.anisotropy = 4;
+				realisticNormal.wrapS = realisticNormal.wrapT = THREE.ClampToEdgeWrapping;
+				realisticNormal.repeat.set(8, 8);
+
+				// var floorMap = THREE.ImageUtils.loadTexture( "obj/lightmap/stone.jpg" );
+				// floorMap.wrapS = floorMap.wrapT = THREE.RepeatWrapping;
+				// floorMap.repeat.set( 8, 8 );
+				// floorMap.anisotropy = 4;
+
+				var originPhongMaterial = new THREE.MeshPhongMaterial( { 
+					color: 0xffffff, 
+					specular: 0xffffff, 
+					specularMap:spec,
+					map:realisticTex,
+					bumpMap: floorMap, 
+					bumpScale: 0.005 
+				} ) 
+
+
+				var standardPhongMaterial = new THREE.MeshPhongMaterial({
+					aoMap: ao,
+					aoMapIntensity: 10.5,
+					color: 0x222222,
+					specular: 0xffffff,
+					specularMap:spec,
+					shiness:10,
+					map: texture,
+					displacementMap: displace,
+					bumpMap: displace,
+					bumpScale: 0.2,
+					normalMap: normal,
+					reflectivity: 0.9,
+				});
+
+
+
+
+				var newestPhongMaterial = new THREE.MeshPhongMaterial({
+					color: 0x222222,
+					specular: 0xffffff,
+					map: realisticTex,
+					bumpMap: floorMap,
+					bumpScale: 0.005,
+					// reflectivity: 0.0,
+				});
+	
+
+		
+				var floorMap = THREE.ImageUtils.loadTexture( "obj/lightmap/stone.jpg" );
+				floorMap.wrapS = floorMap.wrapT = THREE.MirrorRepeatWrapping;
+				floorMap.repeat.set( 4, 4 );
+				floorMap.anisotropy = 4;
+
+				var object = new THREE.Mesh( new THREE.PlaneGeometry( 150, 150 ), new THREE.MeshPhongMaterial( { 
+					color: 0x000000, 
+					specular: 0xffffff, 
+					bumpMap: floorMap, 
+					bumpScale: 0.015 } ) );
+				//
+				object.position.y = 1.2;
+				object.rotation.x = -Math.PI/2;
+				scene.add( object );
+
+
+				// var object = new THREE.Mesh( new THREE.PlaneGeometry( 100, 100 ), originPhongMaterial);
+				// object.rotation.x = -Math.PI/2;
+				// cene.add( object );
+
+				// //morph
+
+				// var loader = new THREE.JSONLoader();
+				// loader.load( "models/animated/sittingBox2.js", function( geometry ) {
+
+				// 	var morphMaterial = new THREE.MeshPhongMaterial( { color: 0xdddddd, specular: 0xffffff, shininess: 50, morphTargets: true, morphNormals: true, side: THREE.DoubleSide } );
+				// 	morphMaterial.shading = THREE.FlatShading;
+
+				// 	geometry.computeMorphNormals();
+				// 	morph = new THREE.MorphAnimMesh( geometry, morphMaterial );
+
+				// 	var s = 10;
+				// 	morph.scale.set( s, s, s );
+				// 	morph.rotation.y = Math.PI;
+
+				// 	morph.duration = 8000;
+				// 	morph.mirroredLoop = true;
+
+				// 	morph.castShadow = true;
+				// 	morph.receiveShadow = true;
+
+				// 	scene.add( morph );
+
+				// } );
+
+			}
+
+
+			// -----------------------------
+
+			function onWindowResize( event ) {
+
+				windowHalfX = window.innerWidth / 2;
+				windowHalfY = window.innerHeight / 2;
+
+				WIDTH = window.innerWidth;
+				HEIGHT = window.innerHeight - 2 * MARGIN;
+
+				renderer.setSize( WIDTH, HEIGHT );
+
+				camera.aspect = WIDTH / HEIGHT;
+				camera.updateProjectionMatrix();
+
+				windowHalfX = window.innerWidth / 2;
+				windowHalfY = window.innerHeight / 2;
+
+				centerButton();
+
+			}
+
+			function onDocumentMouseMove( event ) {
+
+				mouseX = ( event.clientX - windowHalfX ) * 1;
+				mouseY = ( event.clientY - windowHalfY ) * 1;
+
+			}
+
+			// -----------------------------
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				render();
+				stats.update();
+
+			}
+
+			function render() {
+
+				// update video texture
+
+				if ( video.readyState === video.HAVE_ENOUGH_DATA && texture ) texture.needsUpdate = true;
+
+				// update camera
+
+				var delta = clock.getDelta();
+
+				targetX = mouseX * .002;
+				targetY = mouseY * .001;
+
+				angle += 0.01 * ( targetX - angle );
+
+				camera.position.x = -Math.sin( angle ) * 90;
+				camera.position.z =  Math.cos( angle ) * 90;
+
+				camera.lookAt( target );
+
+				// update morph
+
+				if ( morph ) morph.updateAnimation( delta * 1000 );
+
+				// render
+
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+		<!-- <script async src="js/libs/rabbit.js"></script> -->
+	</body>
+</html>
